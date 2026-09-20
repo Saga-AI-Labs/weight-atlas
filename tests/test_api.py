@@ -812,6 +812,25 @@ class TestFileBrowser:
             assert resp.status_code == 200
             assert "outside the allowed model roots" in resp.text
 
+    def test_browse_package_mode_lists_wasc(self, client: TestClient, tmp_path: Path) -> None:
+        root = tmp_path / "browse_root"
+        root.mkdir()
+        (root / "scan.wasc").write_bytes(b"")
+        (root / "my_model.safetensors").write_bytes(b"")
+        (root / "notes.txt").write_bytes(b"not a package")
+
+        resp = client.get("/api/browse", params={"path": str(root), "mode": "package"})
+        assert resp.status_code == 200
+        assert "scan.wasc" in resp.text
+        assert "my_model.safetensors" not in resp.text
+        assert "notes.txt" not in resp.text
+
+        # Model mode hides packages in turn.
+        resp = client.get("/api/browse", params={"path": str(root), "mode": "model"})
+        assert resp.status_code == 200
+        assert "my_model.safetensors" in resp.text
+        assert "scan.wasc" not in resp.text
+
     def test_browse_nonexistent_path(self, client: TestClient) -> None:
         resp = client.get("/api/browse", params={"path": "/nonexistent/path", "mode": "model"})
         assert resp.status_code == 200

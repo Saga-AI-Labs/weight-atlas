@@ -60,6 +60,8 @@ scan/render/compare, and provides file-browsing and result endpoints. The UI
 - **Deterministic job IDs**: `uuid4` is fine (not an output artefact).
 - **File browsing is confined**: `GET /api/browse` must never escape the
   allowed roots (models/ + scan output dirs) — `_require_allowed` guard.
+  Picker modes: `model` (`.gguf`/`.safetensors`/`.pt`), `dir` (any
+  directory), `package` (`.wasc` share packages for the import dialog).
 - **Compare payload**: `POST /api/compare` accepts `mode` (strict/aligned)
   and `interp` (linear/nearest); validate unknown values with 400 before
   enqueueing. Both `dir_a`/`dir_b` must be actual scan output dirs —

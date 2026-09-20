@@ -16,6 +16,8 @@ from weight_atlas.core.types import AtlasSpec, load_default_spec
 
 # Model-file picker: safe suffixes shown in the browse dialog.
 _BROWSE_MODEL_SUFFIXES = {".gguf", ".safetensors", ".pt"}
+# Package picker: share packages shown in the import dialog.
+_BROWSE_PACKAGE_SUFFIXES = {".wasc"}
 
 
 def create_router(
@@ -88,9 +90,11 @@ def create_router(
 
         ``mode="model"``: directories navigate; model files and model
         directories are selectable. ``mode="dir"``: any directory is
-        selectable (used by the scan import dialog).
+        selectable (used by the scan import dialog). ``mode="package"``:
+        directories navigate; ``.wasc`` files are selectable (used by the
+        package import dialog).
         """
-        if mode not in ("model", "dir"):
+        if mode not in ("model", "dir", "package"):
             mode = "model"
 
         raw = Path(path) if path else _browse_start()
@@ -106,6 +110,7 @@ def create_router(
 
         dirs: list[dict[str, Any]] = []
         files: list[dict[str, Any]] = []
+        suffixes = _BROWSE_PACKAGE_SUFFIXES if mode == "package" else _BROWSE_MODEL_SUFFIXES
         try:
             entries = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
         except PermissionError:
@@ -122,7 +127,7 @@ def create_router(
                             "is_model_dir": _dir_has_model(p),
                         }
                     )
-                elif p.suffix.lower() in _BROWSE_MODEL_SUFFIXES:
+                elif p.suffix.lower() in suffixes:
                     files.append({"name": p.name, "path": str(p)})
             except OSError:
                 continue
