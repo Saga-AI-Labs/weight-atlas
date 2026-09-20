@@ -180,10 +180,47 @@ def _load_nvfp4_triple(
 
 
 def _discover_files(path: Path) -> list[Path]:
-    """Return sorted list of .safetensors files for a file or directory."""
+    """Return sorted list of .safetensors files for a file or directory.
+
+    Directory discovery is index-aware: when a HF shard index
+    (``*.safetensors.index.json`` with a ``weight_map``) is present, only
+    the files referenced by the map are returned — auxiliary sidecars such
+    as Nvidia ModelOpt ``amax.safetensors`` / ``amax_checkpoint.safetensors``
+    (calibration caches whose keys overlap each other) are never scanned as
+    weights. Without an index, ``*.safetensors`` files are returned sorted,
+    except ``amax*`` calibration sidecars, which are skipped explicitly.
+    """
     if path.is_file():
         return [path]
+    index_files = sorted(path.glob("*.safetensors.index.json"))
+    # Prefer the canonical name when several indexes exist (deterministic).
+    index_files.sort(key=lambda p: (p.name != "model.safetensors.index.json", p.name))
+    if index_files:
+        weight_map: dict[str, str] = {}
+        for idx in index_files:
+            try:
+                with open(idx) as f:
+                    raw = json.load(f)
+            except (OSError, ValueError):
+                continue
+            wm = raw.get("weight_map") if isinstance(raw, dict) else None
+            if isinstance(wm, dict) and wm:
+                weight_map = {str(k): str(v) for k, v in wm.items()}
+                break
+        if weight_map:
+            files = sorted({path / v for v in weight_map.values()})
+            missing = [f for f in files if not f.is_file()]
+            if missing:
+                raise FileNotFoundError(
+                    f"safetensors index {index_files[0].name} references "
+                    f"missing files: {[m.name for m in missing]}"
+                )
+            return files
+        # Unreadable/empty index — fall through to the glob path below.
     files = sorted(path.glob("*.safetensors"))
+    # Calibration sidecars, not weights (ModelOpt writes both during
+    # calibration; their tensor names overlap each other by design).
+    files = [f for f in files if not f.name.lower().startswith("amax")]
     if not files:
         raise FileNotFoundError(f"no .safetensors files in {path}")
     return files
@@ -214,7 +251,11 @@ class SafetensorsLoader:
             entries: list[tuple[str, tuple[int, ...], str, int, int]] = []
             for name, info in header.items():
                 if name in seen:
-                    raise ValueError(f"duplicate tensor name {name!r} in {f} and {seen[name]}")
+                    raise ValueError(
+                        f"duplicate tensor name {name!r} in {f} and {seen[name]} — "
+                        "if one file is a calibration/optimizer sidecar, keep only "
+                        "the weight shards (or add the HF *.safetensors.index.json)"
+                    )
                 seen[name] = f
                 shape = tuple(int(x) for x in info["shape"])
                 dtype = str(info["dtype"])

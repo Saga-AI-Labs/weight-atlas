@@ -52,6 +52,41 @@ def test_loader_rejects_duplicate_names():
             loader.open(tmp)
 
 
+def test_loader_skips_amax_sidecars(tmp_path):
+    """ModelOpt writes amax.safetensors + amax_checkpoint.safetensors with
+    overlapping quantizer keys — they are calibration caches, not weights."""
+    w = np.zeros((2, 2), dtype=np.float32)
+    q = np.zeros((2,), dtype=np.float32)
+    save_file({"model.weight": w}, tmp_path / "model.safetensors")
+    save_file({"model.language_model.layers.0.mlp.experts.down_proj.0.input_quantizer": q},
+              tmp_path / "amax.safetensors")
+    save_file({"model.language_model.layers.0.mlp.experts.down_proj.0.input_quantizer": q},
+              tmp_path / "amax_checkpoint.safetensors")
+    loader = SafetensorsLoader()
+    handles = loader.open(tmp_path)
+    assert [h.name for h in handles] == ["model.weight"]
+
+
+def test_loader_index_selects_weight_shards(tmp_path):
+    """With a HF shard index, only weight_map files load — sidecars listed
+    nowhere are ignored even when they duplicate a shard tensor name."""
+    import json as _json
+
+    w = np.zeros((2, 2), dtype=np.float32)
+    save_file({"model.weight": w}, tmp_path / "model-00001-of-00002.safetensors")
+    save_file({"other.weight": w}, tmp_path / "model-00002-of-00002.safetensors")
+    save_file({"model.weight": w}, tmp_path / "sidecar.safetensors")
+    (tmp_path / "model.safetensors.index.json").write_text(_json.dumps({
+        "weight_map": {
+            "model.weight": "model-00001-of-00002.safetensors",
+            "other.weight": "model-00002-of-00002.safetensors",
+        }
+    }))
+    loader = SafetensorsLoader()
+    handles = loader.open(tmp_path)
+    assert sorted(h.name for h in handles) == ["model.weight", "other.weight"]
+
+
 def test_loader_directory_glob_sorted():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)

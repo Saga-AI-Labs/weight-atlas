@@ -70,6 +70,12 @@ formats).
 - **Safetensors header validation**: header length capped at 512 MB and every
   tensor's `data_offsets` must satisfy `0 <= start <= end <= data_len`
   (`_validate_offsets`) before any payload read.
+- **Safetensors shard discovery** (`_discover_files`, shared with EXL3):
+  directory scans honour `*.safetensors.index.json` `weight_map` when present
+  (only mapped files load); otherwise a sorted `*.safetensors` glob minus
+  `amax*` ModelOpt calibration sidecars (`amax`/`amax_checkpoint` overlap by
+  design and are not weights). Genuine duplicate tensor names still raise
+  ValueError.
 - **NVFP4 (safetensors, compressed-tensors `nvfp4-pack-quantized`)**:
   `nvfp4.py` decodes FP4 E2M1 weights (nibble-packed, low nibble = even
   column) x per-group-16 **E4M3 scales stored as full bytes** (tensor
