@@ -88,7 +88,8 @@
         "rules": {
           "moe": [
             ["mlp\\.gate\\.weight", "router"],
-            ["shared_expert_gate", "other"],
+            ["\\.(input_scale|weight_scale(_2)?|weight_global_scale)$", "quant_scale"],
+            ["shared_expert_gate", "shared_gate"],
             ["shared_expert\\.(gate|up|down)_proj", null],
             ["mlp\\.experts\\.(\\d+)\\.(gate|up|down)_proj", null],
             ["block_sparse_moe\\.shared_experts", null],

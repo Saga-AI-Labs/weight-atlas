@@ -46,7 +46,12 @@ _RULES: list[tuple[re.Pattern[str], str]] = [
 # IMPORTANT: Order matters! mlp.gate.weight (router) must come before mlp.gate_proj
 _MOE_RULES: list[tuple[re.Pattern[str], str | None]] = [
     (re.compile(r"mlp\.gate\.weight"), "router"),  # MoE router (before mlp_gate)
-    (re.compile(r"shared_expert_gate"), "other"),  # Shared expert gate → other
+    # Quantization auxiliaries (NVFP4/HF scale siblings that survive as
+    # standalone handles — split triples, per-expert input scales): accounted
+    # metadata, never raster cells (no spec.slots column) and never expert
+    # panels (is_expert_tensor/get_moe_slot/extract_expert_id are weight-only).
+    (re.compile(r"\.(input_scale|weight_scale(_2)?|weight_global_scale)$"), "quant_scale"),
+    (re.compile(r"shared_expert_gate"), "shared_gate"),  # Per-layer shared-expert gate
     (re.compile(r"shared_expert\.(gate|up|down)_proj"), None),  # Shared expert → mlp slots (handled specially)
     (re.compile(r"mlp\.experts\.(\d+)\.(gate|up|down)_proj"), None),  # Expert tensors (handled specially)
     # Kimi K3 / DeepSeek-style block_sparse_moe MoE

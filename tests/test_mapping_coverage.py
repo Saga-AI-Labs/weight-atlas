@@ -159,6 +159,121 @@ def test_mapping_coverage_flash_next_hf_families(spec):
     assert map_name("model.language_model.layers.1.ple.key_proj.weight") == (1, "ngram_key")
 
 
+def test_mapping_coverage_nvfp4_scale_siblings_mapped(spec):
+    """NVFP4/HF scale siblings that survive as standalone handles (split
+    triples, per-expert input scales) must map to the quant_scale slot —
+    not "other" (Flash-Next ablits carry ~73k of them)."""
+    from weight_atlas.core.types import TensorStats
+
+    names = [
+        "model.language_model.layers.0.mlp.experts.0.down_proj.input_scale",
+        "model.language_model.layers.1.mlp.experts.261.down_proj.weight_scale_2",
+        "model.language_model.layers.5.mlp.experts.309.gate_proj.weight_scale",
+        "model.language_model.layers.5.mlp.experts.309.gate_proj.weight_scale_2",
+        "model.language_model.layers.0.mlp.experts.0.down_proj.weight_global_scale",
+        "model.language_model.layers.0.mlp.shared_expert_gate.weight",
+    ]
+    stats = [TensorStats(name=n, shape=(32, 32)) for n in names]
+    fp = _build_fingerprint(stats, spec, "safetensors")
+
+    mc = fp["mapping_coverage"]
+    assert mc["in_slots"] == 1.0, mc["unmapped_tensors"]
+    assert mc["unmapped"] == 0
+
+    from weight_atlas.core.name_map import map_name
+
+    assert map_name(names[0]) == (0, "quant_scale")
+    assert map_name(names[1]) == (1, "quant_scale")
+    assert map_name(names[2]) == (5, "quant_scale")
+    assert map_name(names[5]) == (0, "shared_gate")
+
+
+def test_mapping_canonical_spec_agrees_on_aux_slots():
+    """The canonical v2.4 spec block (default-spec path) must resolve the
+    aux slots identically to the fallback tables."""
+    from weight_atlas.core.name_map import map_name
+
+    assert map_name(
+        "model.language_model.layers.1.mlp.experts.261.down_proj.weight_scale"
+    ) == (1, "quant_scale")
+    assert map_name(
+        "model.language_model.layers.0.mlp.shared_expert_gate.weight"
+    ) == (0, "shared_gate")
+    # MTP tower stays off the language raster (layer None) with the aux slot.
+    assert map_name(
+        "mtp.layers.0.mlp.experts.0.down_proj.weight_scale"
+    ) == (None, "quant_scale")
+    # Merged expert weights still resolve the expert machinery.
+    from weight_atlas.core.name_map import (
+        extract_expert_id,
+        get_moe_slot,
+        is_expert_tensor,
+    )
+
+    w = "model.language_model.layers.0.mlp.experts.7.up_proj.weight"
+    assert map_name(w) == (0, "expert")
+    assert is_expert_tensor(w) and get_moe_slot(w) == "up"
+    assert extract_expert_id(w) == 7
+
+
+def test_mapping_hf_moe_rules_in_sync_with_canonical_spec():
+    """The fallback hf.moe table must equal the canonical v2.4 block (the
+    group this feature edits). Full-table equality is NOT asserted: the GGUF
+    groups have pre-existing drift (out of scope)."""
+    import json
+
+    from weight_atlas.core.name_map import _MOE_RULES
+
+    block = json.loads(Path("specs/atlas_spec.v2.4.json").read_text())["name_map"]
+    assert block["conventions"]["hf"]["rules"]["moe"] == [
+        [p.pattern, s] for p, s in _MOE_RULES
+    ]
+
+
+def test_quant_scale_and_shared_gate_excluded_from_fields(spec):
+    """Aux slots add no raster columns and never enter expert panels: the
+    main grid keeps exactly len(spec.slots) columns."""
+    import numpy as np
+
+    from weight_atlas.core.name_map import (
+        extract_expert_id,
+        get_moe_slot,
+        is_expert_tensor,
+    )
+    from weight_atlas.core.types import TensorStats
+    from weight_atlas.fields.rasterizer import (
+        rasterize,
+        rasterize_expert_panels,
+    )
+
+    stats = [
+        TensorStats(name="model.layers.0.self_attn.q_proj.weight", shape=(4, 4), frobenius=1.0),
+        TensorStats(name="model.layers.0.mlp.experts.0.down_proj.input_scale", shape=(4, 4), frobenius=2.0),
+        TensorStats(name="model.layers.0.mlp.experts.0.down_proj.weight_scale", shape=(4, 4), frobenius=3.0),
+        TensorStats(name="model.layers.0.mlp.shared_expert_gate.weight", shape=(4, 4), frobenius=4.0),
+        TensorStats(name="model.layers.0.mlp.experts.0.down_proj.weight", shape=(4, 4), frobenius=5.0),
+    ]
+    field = rasterize(stats, spec, "frobenius")
+    assert field.data.shape == (1, len(spec.slots))
+    assert list(field.col_labels) == list(spec.slots)
+    # Only the dense q_proj cell is filled; aux tensors fill nothing.
+    assert float(np.nansum(field.data)) == 1.0
+
+    panels = rasterize_expert_panels(stats, spec, "frobenius")
+    assert panels  # the real expert weight still builds panels
+    total = sum(float(np.nansum(p.data)) for p in panels)
+    assert total == 5.0  # scales contribute nothing
+
+    for n in (
+        "model.layers.0.mlp.experts.0.down_proj.input_scale",
+        "model.layers.0.mlp.experts.0.down_proj.weight_scale",
+        "model.layers.0.mlp.shared_expert_gate.weight",
+    ):
+        assert not is_expert_tensor(n)
+        assert get_moe_slot(n) is None
+        assert extract_expert_id(n) is None
+
+
 def test_mapping_mtp_never_collides_with_language_rows(spec):
     """MTP draft-tower tensors must map layer-None: mtp.layers.N would
     otherwise overwrite language row N (raster cells are last-wins)."""

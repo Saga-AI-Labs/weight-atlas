@@ -97,7 +97,10 @@ formats).
   standalone records — they must NEVER resolve expert machinery
   (`is_expert_tensor`/`get_moe_slot`/`extract_expert_id` are weight-only;
   scale siblings would otherwise collide with weight cells in expert
-  panels, last-wins). Standalone F8_E4M3 tensors decode via the nvfp4
+  panels, last-wins). `name_map` places scale siblings (`input_scale`,
+  `weight_scale[_2]`, `weight_global_scale`) and `shared_expert_gate` in
+  the non-raster `quant_scale` / `shared_gate` slots (accounted coverage,
+  never raster cells or panels). Standalone F8_E4M3 tensors decode via the nvfp4
   bitfield table in `_from_raw` (a scan must never crash on them).
 - **0-D scalar tensors scan**: `to_matrix` maps `()` → `(1, 1)`; 1-D/0-D
   stable_rank = 1.0 with the zero-signal guard first (all-zero → 0.0).

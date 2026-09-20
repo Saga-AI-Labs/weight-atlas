@@ -43,10 +43,11 @@ class TestMoENameMapping:
         assert slot == "mlp_gate"
 
     def test_hf_shared_expert_gate(self):
-        """Shared expert gate should map to other."""
+        """Shared expert gate maps to the non-raster shared_gate slot
+        (accounted coverage, never a raster cell or expert panel)."""
         layer, slot = map_name("model.layers.0.shared_expert_gate.weight")
         assert layer == 0
-        assert slot == "other"
+        assert slot == "shared_gate"
 
     def test_extract_expert_id(self):
         """Expert ID should be extracted from tensor name."""
@@ -61,14 +62,15 @@ class TestMoENameMapping:
     def test_scale_siblings_are_not_expert_tensors(self):
         """Scale siblings share the expert name prefix but must NOT route
         into expert panels — their records would collide with the weight
-        cells (last-wins). Regression from the Flash-Next NVFP4 export
+        cells (last-wins). They map to the non-raster quant_scale slot.
+        Regression from the Flash-Next NVFP4 export
         (73,728 input_scale scalars)."""
         for suffix in ("input_scale", "weight_scale", "weight_scale_2"):
             n = f"model.language_model.layers.0.mlp.experts.3.gate_proj.{suffix}"
             assert not is_expert_tensor(n), n
             assert get_moe_slot(n) is None, n
             assert extract_expert_id(n) is None, n
-            assert map_name(n)[1] == "other", n
+            assert map_name(n) == (0, "quant_scale"), n
 
     def test_is_shared_expert(self):
         """Shared expert detection."""
